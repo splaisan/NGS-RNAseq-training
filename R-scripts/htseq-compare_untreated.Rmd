@@ -1,0 +1,172 @@
+---
+title: Effect off the tophat reference on gene counts
+author: "SP:BITS"
+date: "25 Mar 2015"
+output: pdf_document
+---
+  
+* Use 'all' and 'gtf' tophat2 + htseq-count results for all 'untreated' samples (2x4)
+* Melt the coun ttables into one dataframe
+* Compute group log2-means and T-test between the groups and correct for multipe testing
+* Identify genes-counts with a T-test result lower than (0.1 & 0.05) and plot their log2-mean in each group.
+
+We first import the count data for the 4 'untreated' HTSeq count files of either the Tophat2 'all' mapping or the 'gtf' mapping experiments.
+
+```{r input data from HTSeq count files}
+library("knitr")
+
+# where are we?
+basedir <- "/work/TUTORIALS/NGS_RNASeqDE-training2015"
+cntdir <- paste(basedir, "htseq_counts", sep="/")
+setwd(basedir)
+
+# build file list
+pref <- c("SRR1039508", "SRR1039512", "SRR1039516", "SRR1039520")
+suff <- c("_all_counts.txt", "_gtf_counts.txt")
+myfiles <- apply(expand.grid(pref, suff), 1, paste, collapse="")
+
+# initialize DT list
+DT <- list()
+
+# read each file as array element of DT and rename the last 2 cols
+# we created a list of single sample tables
+for (i in 1:length(myfiles) ) {
+  infile = paste(cntdir, myfiles[i], sep = "/")
+ 	DT[[myfiles[i]]] <- read.table(infile, header = F, stringsAsFactors = FALSE)
+	cnts <- gsub("(.*)_counts.txt", "\\1", myfiles[i])
+	colnames(DT[[myfiles[i]]]) <- c("ID", cnts)
+}
+
+# merge all elements based on first ID columns
+data <- DT[[myfiles[1]]]
+
+# inspect
+head(data)
+
+# we now add each other table with the ID column as key
+for (i in 2:length(myfiles)) {
+	y <- DT[[myfiles[i]]]
+	z <- merge(data, y, by = c("ID"))
+	data <- z
+}
+
+# ID column becomes rownames
+rownames(data) <- data$ID
+data <- data[,-1]
+
+## add total counts per sample
+data <- rbind(data, tot.counts=colSums(data))
+
+# inspect and look at the top row names!
+head(data, 6)
+tail(data, 3)
+
+####################################
+# take summary data to a new table
+# ( not starting with ENS with invert=TRUE )
+
+# transpose table for readability
+data.untr.summary <- data[grep("^ENS", rownames(data), perl=TRUE, invert=TRUE), ]
+
+# review
+data.untr.summary
+
+# transpose table
+t(data.untr.summary)
+
+# write summary to file
+write.csv(data.untr.summary, file = "htseq_counts_untreated-all_gtf-summary.csv")
+
+kable(t(data.untr.summary[c(1:3,6),]), format="pandoc")
+
+####################################
+# take count data to a new table
+
+data.untr <- data[grep("^ENS", rownames(data), perl=TRUE, invert=FALSE), ]
+
+# final merged table
+head(data.untr, 3)
+
+# cleanup intermediate objects
+rm(y, z, i, DT, data)
+```
+
+We then define the two groups and compute descriptive statistics using R built-in functions.
+
+```{r stats}
+# groups
+all.grp <- grep( "_all", colnames(data.untr) )
+gtf.grp <- grep( "_gtf", colnames(data.untr) )
+
+# compute mean for each group
+t.test.p.value <- function(...) {
+  obj<-try(t.test(...), silent=TRUE)
+  if (is(obj, "try-error")) return(NA) else return(obj$p.value)
+}
+
+foo <- function(x, digits = 2L, ...) {
+  x <- c(x, recursive = TRUE, use.names = FALSE)
+  res <- c( gtfmean = mean(x[gtf.grp], ...),
+            allmean = mean(x[all.grp], ...), 
+            logfc = log( (mean(x[gtf.grp], ...)+1) / 
+                           (mean(x[all.grp], ...)+1), 2),
+            p.value = t.test.p.value(x[gtf.grp], x[all.grp], 
+                            alternative="two.sided",
+                            paired = FALSE) )
+  }
+
+# add stats to raw data
+data.untr <- cbind( data.untr, t(apply(data.untr, 1, foo, na.rm = TRUE)) )
+
+# add adj.pval
+data.untr <- cbind( data.untr, padj = p.adjust(data.untr$p.value, method="BH") )
+
+# final merged table
+head(data.untr, 3)
+
+# write data to file
+write.csv(data.untr, file = "htseq_counts_untreated-all_gtf-counts.csv")
+```
+
+To conclude about the difference between full genome mapping (all) and exon-mappiong (gtf), we use the mean signal (log2-transformed) obtained for each group of 4 cell untreated cell lines in a scatter plot.
+
+```{r plotting results, fig.width=5, fig.height=5 }
+# significant subsets
+cutoff1 <- 0.1
+sigres.01 <- subset(data.untr, data.untr$padj < cutoff1)
+
+# significant genes with T-test < cutoff1
+table(data.untr$padj < cutoff1)
+
+cutoff2 <- 0.05
+sigres.005 <- subset(data.untr, data.untr$padj < cutoff2)
+
+# significant genes with T-test < cutoff2
+table(data.untr$padj < cutoff2)
+
+title <- "Counts significantly different\nbetween 'untreated'-groups ('all' vs 'gtf')"
+plot( log(data.untr$gtfmean, 2), log(data.untr$allmean, 2),
+      xlim=c(0,12),
+      ylim=c(0,12),
+      xlab="log2-mean gtf-counts",
+      ylab="log2-mean all-counts",
+      main=title, 
+      col="green1", cex=0.25, pch=20)
+
+points( log(sigres.01$gtfmean, 2), log(sigres.01$allmean, 2),
+      col="red1", cex=0.5, pch=20)
+
+points( log(sigres.005$gtfmean, 2), log(sigres.005$allmean, 2),
+        col="black", cex=1, pch=20)
+
+# add lines
+abline(0, 1, col="blue1", lty=1, lwd=2)
+```
+
+**Legend:** Green dots represent mean values of genes-counts **not** significantly different between the tophat **'all'** and **'gtf'** sample groups. Red dots had T-test results below **0.1**, while black dots obtained a T-test value lower than **0.05**.
+
+We see in this final graph that a number of genes appear differentially expressed when comparing HTSeq counts obtained from the two tophat2 workflows applied to the same original reads. Investigating the read coverage across these genes would probably reveal mapping biases influenced by the non-exomic part of the human reference in the case of the 'all' mapping (ambiguous mapping reads).
+
+```{r}
+sessionInfo()
+```

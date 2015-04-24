@@ -1,0 +1,477 @@
+---
+title: "DESeq2_analysis of the SRP033351 data"
+author: "SP:BITS"
+date: "14 Mar 2015"
+output: pdf_document
+geometry: top=1.5cm, bottom=1.5cm, left=2cm, right=1cm
+papersize: a4paper
+fontsize: 8pt
+---
+
+All preliminary steps were performed in separate training exercises. We have at this point HTSeq counts for each sample and continue with the DESeq2 vignette <http://www.bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.pdf> where the HTSeq data is loaded in a DESeq2 object for analysis.
+
+## Required packages
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library("DESeq2")
+library("ggplot2")
+library("vsn")
+library("RColorBrewer")
+library("gplots")
+```
+
+# Locate and load data
+
+First we want to specify a variable which points to the directory in which the HTSeq output files are located. We then create a metadata table that will help ordering and merging the results.
+
+```{r}
+# please adapt this location to match your own environment
+#basedir <- "/work/TUTORIALS/NGS_RNASeqDE-training2015"
+basedir <- "/media/bits/RNASeq_DATA/Final_results/R_results"
+setwd(basedir)
+
+# load metadata
+metadata <- read.table("GSE52778_metadata.txt", header = TRUE)
+metadata$sampleFiles <- paste( metadata$run_accession, "_all_counts.txt", sep="")
+
+# restrict to untreated and Dex samples
+selectedRows <- metadata[grep("untreated|^Dex", metadata$treatment), ]
+
+sampleTable <- data.frame(sampleName = selectedRows$run_accession,
+  fileName = selectedRows$sampleFiles,
+  cells = selectedRows$cells,
+  treatment = selectedRows$treatment)
+
+sampleTable
+```
+
+## HTSeq input
+
+Load HTSeq data into a DESeq2 object.
+
+```{r}
+# point directory to the folder containing the htseq count files
+# directory <- "/work/TUTORIALS/NGS_RNASeqDE-training2015/htseq_counts"
+directory <- "/media/bits/RNASeq_DATA/htseq_counts"
+  
+dds <- DESeqDataSetFromHTSeqCount(sampleTable = sampleTable,
+                                  directory = directory,
+                                  design = ~ cells + treatment)
+
+# review the object
+dds
+
+# column information
+colData(dds)
+
+# relevel to get untreated as reference
+dds$treatment <- relevel(dds$treatment, "untreated")
+```
+
+##  Differential expression analysis
+
+The DESeq function is a wrapper that performs a default analysis through three steps:
+
+* estimation of size factors: estimateSizeFactors
+* estimation of dispersion: estimateDispersions
+* Negative Binomial GLM fitting and Wald statistics: nbinomWaldTest
+
+
+```{r}
+# run the combined DESeq2 analysis
+dds <- DESeq(dds)
+
+# estimating size factors
+# estimating dispersions
+# gene-wise dispersion estimates
+# mean-dispersion relationship
+# final dispersion estimates
+# fitting model and testing
+
+# Dispersion plot and fitting alternatives
+plotDispEsts(dds)
+
+# get size factors used for normalization
+sizeFactors(dds)
+
+# store results into a new object
+res <- results(dds)
+
+# reorder the results by decreasing significance
+resOrdered <- res[order(res$padj),]
+
+# inspect
+head(resOrdered)
+
+# We can summarize some basic tallies using the summary function.
+summary(res)
+
+## being more stringent
+summary(res, alpha=0.01)
+```
+
+## Diagnostic plots for multiple testing
+
+The plot shows the effect of multiple testing and defines the limit of trust of the results as compared to a random situation.
+
+```{r}
+# keep only data with computed pval
+resFilt <- res[!is.na(res$pvalue),]
+
+# order data by increasing pval
+orderInPlot <- order(resFilt$pvalue)
+
+# filter to show only top
+showInPlot <- (resFilt$pvalue[orderInPlot] <= 0.08)
+
+# set significance level for testing
+alpha <- 0.1
+
+plot(seq(along=which(showInPlot)), resFilt$pvalue[orderInPlot][showInPlot],
+     pch=".", xlab = expression(rank(p[i])), ylab=expression(p[i]))
+# add limit
+abline(a=0, b=alpha/length(resFilt$pvalue), col="red3", lwd=2)
+```
+
+## Exploring and exporting results
+
+```{r}
+# current results
+head(res, 4)
+
+# keep only data with computed pval
+resFilt <- res[!is.na(res$pvalue),]
+
+head(resFilt, 4)
+
+# MA-plot
+# legend: Points will be colored red if the adjusted p value is less than 0.1. Points which fall out of the window are plotted as open triangles pointing either up or down.
+
+# plots for DESeq transformed data
+plotMA(res, main="MAplot after DESeq2 analysis", ylim=c(-2,2))
+
+# A column lfcMLE with the unshrunken maximum likelihood estimate (MLE) for the log2 fold change will be added with an additional argument to results:
+resMLE <- results(dds, addMLE=TRUE)
+head(resMLE, 4)
+
+# significant calls
+# keep only data with computed pval
+resMLEFilt <- resMLE[!is.na(resMLE$pvalue),]
+resMLESig <- subset(resMLEFilt, resMLEFilt$padj<0.1)
+  
+# plotMA with unshrunken values
+plot(log(resMLEFilt$baseMean, 10), resMLEFilt$lfcMLE,
+     ylim=c(-6,6),
+     xlab="mean expression",
+     ylab="log fold change (no shrinkage)",
+     pch=20,
+     col="grey1",
+     cex=0.25,
+     main="MA-plot without shrinkage (padj<0.1)")
+
+# color significant
+points(log(resMLESig$baseMean,10), resMLESig$lfcMLE,
+       col="red",
+       pch=20,
+       cex=0.25)
+
+# add limit
+abline(a=0, b=alpha/length(resFilt$pvalue), col="red1", lwd=2)
+
+# SAME using built in capabilitiezs of DESeq2
+resNoPrior <- DESeq(dds, betaPrior=FALSE)
+plotMA(resNoPrior, main="MAplot after DESeq2 analysis without priors", 
+       ylim=c(-2,2))
+```
+
+## Plot counts
+
+Plot counts for a given gene; here the gene with best pvalue for DE between Dex and untreated.
+
+```{r}
+# simple plot for the best scoring gene (based on padj)
+onegene <- rownames(res)[which.min(res$padj)]
+
+plotCounts(dds, gene=which.min(res$padj), intgroup="treatment", main=onegene)
+plotCounts(dds, gene=which.min(res$padj), intgroup="cells", main=onegene)
+
+plotCounts(dds, gene="ENSG00000000938", intgroup="treatment", main="ENSG00000000938")
+
+# nicer version using ggplot2
+#library("ggplot2")
+d <- plotCounts(dds,
+                gene=which.min(res$padj),
+                intgroup="treatment",
+                main=onegene,
+                returnData=TRUE)
+
+ggplot(d, aes(x=treatment, y=count)) +
+  geom_point(position=position_jitter(w=0.1,h=0)) +
+  scale_y_log10(breaks=c(25,100,400)) +
+  labs(title=onegene)
+```
+
+## Result Information
+
+More information on results columns Information about which variables and tests were used can be found by calling the function mcols on the results object.
+
+```{r}
+mcols(res)$description
+
+# [1] "mean of normalized counts for all samples"
+# [2] "log2 fold change (MAP): treatment Dex vs untreated"
+# [3] "standard error: treatment Dex vs untreated"
+# [4] "Wald statistic: treatment Dex vs untreated"
+# [5] "Wald test p-value: treatment Dex vs untreated"
+# [6] "BH adjusted p-values"
+```
+
+## Exporting results to HTML or CSV files
+
+```{r}
+write.csv(as.data.frame(resOrdered), file="Dex_vs_untreated_results.csv")
+
+# count with two cutoffs
+print("# rows with abs(LFC) >=1")
+table(abs(resOrdered$log2FoldChange)>=1)
+
+print("# rows with padj<0.05")
+table(resOrdered$padj<0.05)
+
+table( ( abs(resOrdered$log2FoldChange)>=1) & (resOrdered$padj<0.05) )
+
+# extract significant subset for padj<0.1
+resSig <- subset(resOrdered, padj < 0.1)
+
+# preview results
+resSig
+
+# plot distribution of LFC in this subset
+hist(resSig$log2FoldChange,
+     xlim=c(-6,6),
+     breaks=20,
+     main="LFC distribution for genes with padj<0.1")
+
+hist(res$log2FoldChange,
+     xlim=c(-6,6),
+     breaks=20,
+     main="LFC distribution for all genes")
+
+# volcano for the subset
+plot(resSig$log2FoldChange, 1-resSig$padj,
+     xlim=c(-6,6),
+     main="volcano plot for genes with padj<0.1")
+
+plot(res$log2FoldChange, 1-res$padj,
+     xlim=c(-6,6),
+     main="volcano plot for all genes")
+# find the most affected genes
+
+print("# rows with abs(LFC) >=2 AND padj<0.05")
+table( (abs(resOrdered$log2FoldChange)>=2 & resOrdered$padj<0.01) )
+
+# make this a new table
+resEffectSig <- subset(resOrdered, ( abs(resOrdered$log2FoldChange)>=2 & padj < 0.01 ))
+dim(resEffectSig)
+# plot distribution of LFC in this subset
+hist(resEffectSig$log2FoldChange,
+     xlim=c(-6,6),
+     breaks=20,
+     main="LFC distribution for genes with |LFC|>=2 & padj<0.1")
+
+# volcano for the subset
+plot(resEffectSig$log2FoldChange, 1-resEffectSig$padj,
+     xlim=c(-6,6),
+     main="volcano plot for genes with |LFC|>=2 & padj<0.01")
+```
+
+### Extracting various values
+
+```{r}
+# extracting average values
+meanval <- assays(dds)[["mu"]]
+head(meanval)
+
+cookdist <- assays(dds)[["cooks"]]
+head(cookdist)
+```
+
+### Extracting transformed values
+
+```{r}
+# Regularized log transformation
+rld <- rlog(dds)
+rld
+
+# Variance stabilizing transformation
+vsd <- varianceStabilizingTransformation(dds)
+vsd
+
+# create matrix for saving or further use
+rlogMat <- assay(rld)
+head(rlogMat)
+
+# create matrix for saving or further use
+vstMat <- assay(vsd)
+head(vstMat)
+```
+
+### Effects of transformations on the variance
+
+```{r}
+# library("vsn")
+par(mfrow=c(1,3))
+notAllZero <- (rowSums(counts(dds))>0)
+meanSdPlot(log2(counts(dds,normalized=TRUE)[notAllZero,] + 1))
+meanSdPlot(assay(rld[notAllZero,]))
+meanSdPlot(assay(vsd[notAllZero,]))
+
+# legend: Standard deviation over mean. Per-gene standard deviation (taken across samples), against the rank of the mean, for the shifted logarithm log2(n + 1) (left), the regularized log transfor- mation (center) and the variance stabilizing transformation (right).
+```
+
+## Data quality assessment by sample clustering and visualization
+
+###  Heatmap of the count matrix
+
+```{r}
+#library("RColorBrewer")
+#library("gplots")
+
+# color palette
+hmcol <- colorRampPalette(brewer.pal(9, "GnBu"))(100)
+
+# select top 20 genes
+n=20
+select <- order(rowMeans(counts(dds,normalized=TRUE)), decreasing=TRUE)[1:n]
+
+# show from counts
+heatmap.2(counts(dds,normalized=TRUE)[select,],
+          col = hmcol,
+          Rowv = FALSE,
+          Colv = FALSE,
+          scale="none",
+          dendrogram="none",
+          trace="none",
+          margin=c(10,6)
+          )
+# show from Regularized log transformation
+heatmap.2(assay(rld)[select,],
+          col = hmcol,
+          Rowv = FALSE,
+          Colv = FALSE,
+          scale="none",
+          dendrogram="none",
+          trace="none",
+          margin=c(10, 6)
+          )
+
+# show from Variance stabilizing transformation
+heatmap.2(assay(vsd)[select,],
+          col = hmcol,
+          Rowv = FALSE,
+          Colv = FALSE,
+          scale="none",
+          dendrogram="none",
+          trace="none",
+          margin=c(10, 6)
+          )
+
+# show from Variance stabilizing transformation with sample clustering
+heatmap.2(assay(vsd)[select,],
+          col = hmcol,
+          Rowv = FALSE,
+          Colv = TRUE,
+          scale="none",
+          dendrogram="column",
+          trace="none",
+          margin=c(10, 6)
+          )
+```
+
+### Heatmap of the sample-to-sample distances
+
+```{r}
+# we need to transpose the data first with t()
+distsRL <- dist(t(assay(rld)))
+
+# store in to matrix
+mat <- as.matrix(distsRL)
+
+# rename samples
+rownames(mat) <- colnames(mat) <- with(colData(dds),
+          paste(treatment, cells, sep=" : "))
+
+# cluster pairwise
+hc <- hclust(distsRL)
+
+# plot heatmap
+heatmap.2(mat,
+          Rowv=as.dendrogram(hc),
+          symm=TRUE,
+          trace="none",
+          col = rev(hmcol),
+          margin=c(13, 13)
+          )
+```
+
+###  Principal component plot of the samples
+
+```{r}
+# simple plot without grouping
+plotPCA(rld, intgroup=c("treatment", "cells"))
+
+# It is also possible to customize the PCA plot using the ggplot function.
+data <- plotPCA(rld, intgroup=c("treatment", "cells"), returnData=TRUE)
+percentVar <- round(100 * attr(data, "percentVar"))
+
+ggplot(data, aes(PC1, PC2, color=treatment, shape=cells)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance"))
+```
+
+### Tests of log2 fold change above or below a threshold
+
+Other ways of testing by choosing the minimal effect size and direction (tails)
+
+* greaterAbs - |beta| > lfcThreshold - tests are two-tailed
+* lessAbs - |beta| < lfcThreshold - p values are the maximum of the upper and lower tests
+* greater - beta > lfcThreshold
+* less - beta < lfcThreshold
+
+```{r}
+# create a new object without priors
+ddsNoPrior <- DESeq(dds, betaPrior=FALSE)
+
+# compute four tests
+resGA <- results(dds, lfcThreshold=.5, altHypothesis="greaterAbs")
+resLA <- results(ddsNoPrior, lfcThreshold=.5, altHypothesis="lessAbs")
+resG <- results(dds, lfcThreshold=.5, altHypothesis="greater")
+resL <- results(dds, lfcThreshold=.5, altHypothesis="less")
+
+# plot MA for each test
+par(mfrow=c(2,2),mar=c(2,2,1,1))
+yl <- c(-2.5,2.5)
+
+plotMA(resGA, ylim=yl)
+abline(h=c(-.5,.5),col="dodgerblue",lwd=2)
+
+plotMA(resLA, ylim=yl)
+abline(h=c(-.5,.5),col="dodgerblue",lwd=2)
+
+plotMA(resG, ylim=yl)
+abline(h=.5,col="dodgerblue",lwd=2)
+
+plotMA(resL, ylim=yl)
+abline(h=-.5,col="dodgerblue",lwd=2)
+```
+
+```{r, eval=TRUE}
+sessionInfo()
+```
+
+\
+
+\
+
+![logo](http://data.bits.vib.be/pub/trainingen/bits_logo_color_150px.png) more at **<http://www.bits.vib.be>**

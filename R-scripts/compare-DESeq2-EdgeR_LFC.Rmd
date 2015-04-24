@@ -1,0 +1,71 @@
+---
+title: "compare DE results of DESeq2 & EdgeR"
+author: "SP:BITS"
+date: "19 Mar 2015"
+output: pdf_document
+---
+
+Comparing DE results obtained with DESeq2 and EdgeR workflows.
+
+```{r}
+# compare-DESeq2-EdgeR_LFC.R
+# copy this code to RStudio and adapt file locations to match yours
+
+# basedir <- "/work/TUTORIALS/NGS_RNASeqDE-training2015"
+basedir <- "/media/bits/RNASeq_DATA/Final_results"
+setwd(basedir)
+
+# load DESeq2 results from files
+deseq2.file <- "Dex_vs_untreated_results.csv"
+deseq2_results <- read.csv(deseq2.file, stringsAsFactors=FALSE)
+deseq2_results <- deseq2_results[order(deseq2_results$padj),]
+colnames(deseq2_results)[1] <- "id"
+head(deseq2_results)
+#                id   baseMean log2FoldChange     lfcSE     stat        pvalue          padj
+# 1 ENSG00000165995   514.2841       3.321662 0.1307366 25.40728 2.095444e-142 3.170407e-138
+# 2 ENSG00000152583   985.5593       4.340812 0.1760858 24.65169 3.529480e-134 2.670051e-130
+# 3 ENSG00000120129  3325.4027       2.873150 0.1167734 24.60448 1.131211e-133 5.705074e-130
+# 4 ENSG00000101347 13616.9348       3.606558 0.1517550 23.76566 7.569343e-125 2.863104e-121
+# 5 ENSG00000189221  2294.7300       3.231983 0.1396172 23.14888 1.491976e-118 4.514719e-115
+# 6 ENSG00000211445 12162.4869       3.540681 0.1573440 22.50281 3.895921e-112 9.824214e-109
+
+# load EdgeR results from files
+edger.file <- "EdgeR-Dex_vs_untreated_results.csv"
+edger_results <- read.csv(edger.file, stringsAsFactors=FALSE)
+edger_results <- edger_results[order(edger_results$padj),]
+colnames(edger_results)[1] <- "id"
+head(edger_results)
+#                id    logFC   logCPM        LR        PValue          padj
+# 1 ENSG00000109906 7.330497 4.209885 1314.6167 7.530502e-288 4.350597e-283
+# 2 ENSG00000165995 3.420225 4.710180  815.1903 2.688130e-179 7.765066e-175
+# 3 ENSG00000152583 4.593225 5.656511  703.0385 6.530830e-155 1.257686e-150
+# 4 ENSG00000171819 5.809612 3.627514  647.4904 7.850693e-143 1.133895e-138
+# 5 ENSG00000163884 4.451690 4.806375  587.1334 1.052997e-129 1.216696e-125
+# 6 ENSG00000101347 3.745477 9.432151  578.3239 8.682964e-128 8.360681e-124
+
+# merge DESeq
+merged.results <- merge(deseq2_results, edger_results, by='id', all = TRUE) 
+
+# plot scatterplot DESeq2 vs DESeq1
+
+# order by increasing DESeq2 padj
+merged.results <- merged.results[order(merged.results$padj.x),]
+
+top.res <- merged.results[which(merged.results$padj.x<0.1),]
+plot(top.res$logFC, top.res$log2FoldChange,  
+     xlab="EdgeR logFC - SRP033351",
+     ylab="DESeq2 log2FoldChange - SRP033351",
+     xlim=c(-4,4),
+     ylim=c(-4,4),
+     pch=20,
+     cex=0.5,
+     main="DESeq2 results with padj<0.1"
+  )
+
+# add red color for the top 100 hits
+top.100 <- head(merged.results, 100)
+points(top.100$logFC, top.100$log2FoldChange, 
+       col="red", lwd=2, pch=20)
+# add lines
+abline(0, 1, col="green", lty=1, lwd=2)
+```

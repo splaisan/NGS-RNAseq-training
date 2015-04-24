@@ -1,0 +1,431 @@
+---
+title: "EdgeR_analysis of the SRP033351 data"
+author: "SP:BITS"
+date: "14 Mar 2015"
+output: pdf_document
+geometry: top=1.5cm, bottom=1.5cm, left=2cm, right=1cm
+papersize: a4paper
+fontsize: 8pt
+---
+
+All preliminary steps were performed in separate training exercises. We have at this point HTSeq counts for each sample and continue with the EdgeR vignette <http://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf> where the HTSeq data is loaded in a EdgeR object for analysis.
+
+## Required packages
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library("edgeR")
+library("ggplot2")
+library("vsn")
+library("RColorBrewer")
+library("gplots")
+```
+
+# Locate and load data
+
+First we want to specify a variable which points to the directory in which the HTSeq output files are located. We then create a metadata table that will help ordering and merging the results.
+
+```{r}
+# please adapt this location to match your own environment
+#basedir <- "/work/TUTORIALS/NGS_RNASeqDE-training2015"
+basedir <- "/media/bits/RNASeq_DATA/Final_results/R_results"
+setwd(basedir)
+
+# load metadata
+metadata <- read.table("GSE52778_metadata.txt", header = TRUE)
+metadata$sampleFiles <- paste( metadata$run_accession, "_all_counts.txt", sep="")
+
+# restrict to untreated and Dex samples
+selectedRows <- metadata[grep("untreated|^Dex", metadata$treatment), ]
+
+sampleTable <- data.frame(sampleName = selectedRows$run_accession,
+  fileName = selectedRows$sampleFiles,
+  cells = selectedRows$cells,
+  treatment = selectedRows$treatment)
+
+# make sure the untreated samples are taken as control condition
+sampleTable$treatment <- relevel(sampleTable$treatment, ref="untreated")
+
+sampleTable
+#   sampleName                  fileName   cells treatment
+# 1 SRR1039508 SRR1039508_all_counts.txt  N61311 untreated
+# 2 SRR1039509 SRR1039509_all_counts.txt  N61311       Dex
+# 3 SRR1039512 SRR1039512_all_counts.txt N052611 untreated
+# 4 SRR1039513 SRR1039513_all_counts.txt N052611       Dex
+# 5 SRR1039516 SRR1039516_all_counts.txt N080611 untreated
+# 6 SRR1039517 SRR1039517_all_counts.txt N080611       Dex
+# 7 SRR1039520 SRR1039520_all_counts.txt N061011 untreated
+# 8 SRR1039521 SRR1039521_all_counts.txt N061011       Dex
+```
+
+## HTSeq input
+
+Load HTSeq data into a merged dataframe object. EdgeR does not provide a function to load separate HTSeq files, we need to merge them using flat R code. We merge only teh 'untreated' and 'Dex' files.
+
+```{r}
+#basedir <- "/work/TUTORIALS/NGS_RNASeqDE-training2015"
+basedir <- "/media/bits/RNASeq_DATA"
+setwd(basedir)
+
+cntdir <- paste(basedir, "htseq_counts", sep="/")
+
+# we take the file list from sampleTable$fileName
+myfiles <- as.vector(sampleTable$fileName)
+DT <- list()
+
+# read each file as array element of DT and rename the last 2 cols
+# we created a list of single sample tables
+for (i in 1:length(myfiles) ) {
+  infile = paste(cntdir, myfiles[i], sep = "/")
+	DT[[myfiles[i]]] <- read.table(infile, header = F, stringsAsFactors = FALSE)
+	cnts <- gsub("(.*)_all_counts.txt", "\\1", myfiles[i])
+	colnames(DT[[myfiles[i]]]) <- c("ID", cnts)
+}
+
+# merge all elements based on first ID columns
+data <- DT[[myfiles[1]]]
+
+# inspect
+head(data)
+
+# we now add each other table with the ID column as key
+for (i in 2:length(myfiles)) {
+	y <- DT[[myfiles[i]]]
+	z <- merge(data, y, by = c("ID"))
+	data <- z
+}
+
+# ID column becomes rownames
+rownames(data) <- data$ID
+# then disappears
+data <- data[,-1]
+
+# keep only rows with ENS IDs
+data <- data[grep("^ENS", rownames(data), perl=TRUE, invert=FALSE), ]
+
+# inspect and look at the top row names!
+head(data)
+#                 SRR1039508 SRR1039509 SRR1039512 SRR1039513 SRR1039516 SRR1039517 SRR1039520
+# ENSG00000000003        667        434        862        401       1133       1050        750
+# ENSG00000000005          0          0          0          0          0          0          0
+# ENSG00000000419        430        488        556        334        529        719        378
+# ENSG00000000457        256        226        276        174        288        358        248
+# ENSG00000000460         56         52         29         30         63         53         68
+# ENSG00000000938          0          0          1          0          1          0          0
+#                 SRR1039521
+# ENSG00000000003        562
+# ENSG00000000005          0
+# ENSG00000000419        468
+# ENSG00000000457        235
+# ENSG00000000460         56
+# ENSG00000000938          0
+
+tail(data)
+#                 SRR1039508 SRR1039509 SRR1039512 SRR1039513 SRR1039516 SRR1039517 SRR1039520
+# ENSG00000273486         13         11         23          6         20         29         12
+# ENSG00000273487          3          4          0          9          6          4          3
+# ENSG00000273488          5          3          5          3          3         10          6
+# ENSG00000273489          0          0          0          2          1          0          0
+# ENSG00000273492          0          0          1          0          0          0          0
+# ENSG00000273493          0          0          0          0          0          0          0
+#                 SRR1039521
+# ENSG00000273486         11
+# ENSG00000273487          8
+# ENSG00000273488         11
+# ENSG00000273489          0
+# ENSG00000273492          0
+# ENSG00000273493          0
+# destroy useless objects
+rm(y,z,DT)
+```
+
+## The GLM approach with paired Model and Blocking
+
+The difference associated with cell line are not our primary interrest and can be removed from the equation by using a paired design and GLM models (blocking).
+
+```{r}
+# we create a new DGE object with counts
+y <- DGEList(counts=data, group=sampleTable$treatment)
+
+colnames(y)
+
+# define design factors
+cells <- factor(sampleTable$cells)
+treatment <- factor(sampleTable$treatment)
+design <- model.matrix(~cells+treatment)
+```
+
+## Filter out low expression genes
+
+These genes introduce noise in teh model and are not interesting due to their extreme variance. Better get rid of them now.
+
+```{r}
+# how many genes & samples in the full data
+dim(y)
+# [1] 57773     8
+
+# Filter out genes with too few counts 
+# REM: 100cpm for the full row sum ~5 reads
+keep <- rowSums(cpm(y)>100) >=2
+y2 <- y[keep,,keep.lib.sizes=FALSE]
+
+# the last parameter 'keep.lib.sizes=FALSE' was added 
+# to ignore removed genes in the new library size computation
+
+# how many genes & samples remain after filtering
+dim(y2)
+# [1] 2176    8
+
+# estimate Common dispersion and show result
+y <- estimateGLMCommonDisp(y, design)
+y$common.dispersion
+# before filtering: [1] 0.01189838
+
+y2 <- estimateGLMCommonDisp(y2, design)
+y2$common.dispersion
+# [1] 0.01186341
+
+# we need either Common or Trended dispersion to compute the Tagwise dispersion
+# alt: estimate Trended dispersion and show result
+y <- estimateGLMTrendedDisp(y, design)
+head(y$trended.dispersion)
+# before filtering: [1] 0.007756180 0.715691079 0.006269901 0.007801945 0.046245273 0.586326434
+
+y2 <- estimateGLMTrendedDisp(y2, design)
+head(y2$trended.dispersion)
+# [1] 0.012350948 0.013354192 0.008984367 0.014751429 0.009823789 0.008809909
+
+# estimate Tagwise dispersion and show result
+y <- estimateGLMTagwiseDisp(y, design)
+head(y$tagwise.dispersion)
+# before filtering: [1] 0.007073358 0.715691079 0.007713463 0.008693123 0.034085032 0.586326434
+
+y2 <- estimateGLMTagwiseDisp(y2, design)
+head(y2$tagwise.dispersion)
+# [1] 0.010266828 0.009748980 0.009714480 0.010345372 0.008473159 0.011154258
+
+# normalize samples
+y <- calcNormFactors(y)
+y2 <- calcNormFactors(y2)
+
+# review results
+y$samples
+# before filtering
+#                group lib.size norm.factors
+# SRR1039508 untreated 18104038    1.0707347
+# SRR1039509       Dex 16545934    1.0411533
+# SRR1039512 untreated 22630840    0.9812414
+# SRR1039513       Dex 13714148    0.9441635
+# SRR1039516 untreated 21747061    1.0258996
+# SRR1039517       Dex 27823823    0.9646121
+# SRR1039520 untreated 17140081    1.0266804
+# SRR1039521       Dex 19170765    0.9529882
+
+y2$samples
+# after filtering: 
+#                group lib.size norm.factors
+# SRR1039508 untreated 12962520    1.0487639
+# SRR1039509       Dex 11937040    1.0563501
+# SRR1039512 untreated 16739654    0.9615356
+# SRR1039513       Dex 10232283    0.9585992
+# SRR1039516 untreated 15769663    1.0190399
+# SRR1039517       Dex 20543889    0.9899991
+# SRR1039520 untreated 12505686    0.9930354
+# SRR1039521       Dex 14199563    0.9775101
+```
+
+## Estimate dispersion
+
+When a negative binomial model is fitted, one needs to estimate the BCV(s) which is equivalent to estimating the dispersion of the data.
+
+```{r}
+# estimate variance
+# MDS plots that shows distances, 
+#     in terms of biological coefficient of variation (BCV), between samples
+plotMDS(y, main="BCV distance")
+
+plotMDS(y2, main="BCV distance (filtered data)")
+
+# a bit nicer plot
+plotMDS(y, main="BCV distance, v2", 
+        col=c(rep(c("black","red"),4)),
+        labels=paste(sampleTable$cells, sampleTable$treatment, sep=":")
+          )
+
+plotMDS(y2, main="BCV distance (filtered data), v2", 
+        col=c(rep(c("black","red"),4)),
+        labels=paste(sampleTable$cells, sampleTable$treatment, sep=":")
+          )
+
+# log-transformation helps shrinking the data in the low range
+# MDS plots that shows distances, in terms of shrunk 'cpm' changes
+logCPM <- cpm(y, log=TRUE)
+plotMDS(logCPM, main="logCPM distance")
+plotMDS(logCPM, main="logCPM distance, v2", 
+        col=c(rep(c("black","red"),4)),
+        labels=paste(sampleTable$cells, sampleTable$treatment, sep=":")
+        )
+
+logCPM2 <- cpm(y2, log=TRUE)
+plotMDS(logCPM2, main="logCPM distance (filtered data)")
+plotMDS(logCPM2, main="logCPM distance (filtered data), v2", 
+        col=c(rep(c("black","red"),4)),
+        labels=paste(sampleTable$cells, sampleTable$treatment, sep=":")
+        )
+```
+
+## Biological coefficient of variation plot
+
+```{r}
+plotBCV(y, 
+        "edgeR: Biological coefficient of variation (BCV) vs abundance")
+
+plotBCV(y2, 
+        "edgeR: Biological coefficient of variation (BCV) vs abundance (filtered data)")
+```
+
+The curly plot obtained on fitered data is not so ''normal''
+
+##  build a GLM fitting model from the data
+
+DE analysisi occurs in two steps:
+
+- The function **glmFit()** fits the negative binomial GLM for each tag and produces an object of class DGEGLM with some new components.
+
+- This DGEGLM object can then be passed to the function **glmLRT()** to carry out the likelihood ratio test.
+
+```{r}
+fit <- glmFit(y, design)
+fit2 <- glmFit(y2, design)
+
+# apply fit to the data for Dex vs Untreated
+lrt <- glmLRT(fit)
+lrt2 <- glmLRT(fit2)
+
+# review top findings
+topTags(lrt)
+# before filtering: 
+# Coefficient:  treatmentDex 
+#                     logFC   logCPM        LR        PValue           FDR
+# ENSG00000109906  7.330497 4.209885 1314.6167 7.530502e-288 4.350597e-283
+# ENSG00000165995  3.420225 4.710180  815.1903 2.688130e-179 7.765066e-175
+# ENSG00000152583  4.593225 5.656511  703.0385 6.530830e-155 1.257686e-150
+# ENSG00000171819  5.809612 3.627514  647.4904 7.850693e-143 1.133895e-138
+# ENSG00000163884  4.451690 4.806375  587.1334 1.052997e-129 1.216696e-125
+# ENSG00000101347  3.745477 9.432151  578.3239 8.682964e-128 8.360681e-124
+# ENSG00000189221  3.345965 6.874666  537.5546 6.418499e-119 5.297371e-115
+# ENSG00000162692 -3.726771 4.760297  522.4380 1.247757e-115 9.010832e-112
+# ENSG00000120129  2.935428 7.407823  493.0571 3.080534e-109 1.977463e-105
+# ENSG00000127954  5.211009 4.241560  491.3008 7.426448e-109 4.290482e-105
+
+topTags(lrt2)
+# Coefficient:  treatmentDex 
+#                     logFC   logCPM       LR        PValue           FDR
+# ENSG00000189221  3.268833 7.317960 604.7934 1.517732e-133 3.302585e-130
+# ENSG00000120129  2.859060 7.850420 528.0597 7.465593e-117 8.122565e-114
+# ENSG00000101347  3.669226 9.872310 427.9689  4.497424e-95  3.262131e-92
+# ENSG00000178695 -2.625352 7.619877 412.2671  1.176629e-91  6.400861e-89
+# ENSG00000211445  3.623321 9.705215 397.3160  2.114563e-88  9.202578e-86
+# ENSG00000157214  1.882460 7.675423 353.4079  7.673983e-79  2.783098e-76
+# ENSG00000134243  2.092546 8.571024 334.2542  1.138244e-74  3.538312e-72
+# ENSG00000152583  4.524233 6.100943 316.0063  1.073556e-70  2.920072e-68
+# ENSG00000198624  2.833797 7.143985 314.7766  1.989255e-70  4.809577e-68
+# ENSG00000125148  2.035365 7.045554 305.8739  1.730167e-68  3.764844e-66
+```
+
+NOTE: The filtering effect is quite impressive and genes that were apparently  very significant DE are now gone.
+
+## Compute differential expression
+
+```{r}
+# count UR, DR and nouncchanged genes
+summary(de <- decideTestsDGE(lrt))
+#    [,1] 
+# -1  2107
+# 0  53540
+# 1   2126
+
+summary(de2 <- decideTestsDGE(lrt2))
+#    [,1]
+# -1  479
+# 0  1195
+# 1   502
+
+# MA-plot
+detags <- rownames(y)[as.logical(de)]
+plotSmear(lrt, de.tags=detags,
+          ylim=c(-5,5),
+          main="MA plot for all genes"
+          )
+abline(h = 0, col = "red")
+abline(h = c(-2, 2), col = "blue")
+
+# MA-plot on filtered data
+detags2 <- rownames(y2)[as.logical(de2)]
+plotSmear(lrt2, de.tags=detags2,
+          ylim=c(-5,5),
+          main="MA plot for filtered genes"
+          )
+abline(h = 0, col = "red")
+abline(h = c(-2, 2), col = "blue")
+```
+
+## Exploring and exporting results
+
+```{r}
+# unfiltered data
+results <- lrt$table
+
+# add FDR to the table
+results$padj <- p.adjust(results$PValue, method="BH")
+
+# reorder by adjusted pvalue
+results <- results[order(results$padj),]
+
+# review top
+head(results)
+#                    logFC   logCPM        LR        PValue          padj
+# ENSG00000109906 7.330497 4.209885 1314.6167 7.530502e-288 4.350597e-283
+# ENSG00000165995 3.420225 4.710180  815.1903 2.688130e-179 7.765066e-175
+# ENSG00000152583 4.593225 5.656511  703.0385 6.530830e-155 1.257686e-150
+# ENSG00000171819 5.809612 3.627514  647.4904 7.850693e-143 1.133895e-138
+# ENSG00000163884 4.451690 4.806375  587.1334 1.052997e-129 1.216696e-125
+# ENSG00000101347 3.745477 9.432151  578.3239 8.682964e-128 8.360681e-124
+
+# save to file
+write.csv(as.data.frame(results), 
+          file="EdgeR-Dex_vs_untreated_results.csv")
+
+# filtered data
+results2 <- lrt2$table
+
+# add FDR to the table
+results2$padj <- p.adjust(results2$PValue, method="BH")
+
+# reorder by adjusted pvalue
+results2 <- results2[order(results2$padj),]
+
+# review top
+head(results2)
+#                     logFC   logCPM       LR        PValue          padj
+# ENSG00000189221  3.268833 7.317960 604.7934 1.517732e-133 3.302585e-130
+# ENSG00000120129  2.859060 7.850420 528.0597 7.465593e-117 8.122565e-114
+# ENSG00000101347  3.669226 9.872310 427.9689  4.497424e-95  3.262131e-92
+# ENSG00000178695 -2.625352 7.619877 412.2671  1.176629e-91  6.400861e-89
+# ENSG00000211445  3.623321 9.705215 397.3160  2.114563e-88  9.202578e-86
+# ENSG00000157214  1.882460 7.675423 353.4079  7.673983e-79  2.783098e-76
+
+# save to file
+write.csv(as.data.frame(results2), 
+          file="EdgeR_filtered-Dex_vs_untreated_results.csv")
+```
+
+
+```{r, eval=TRUE}
+sessionInfo()
+```
+
+\
+
+\
+
+![logo](http://data.bits.vib.be/pub/trainingen/bits_logo_color_150px.png) more at **<http://www.bits.vib.be>**
