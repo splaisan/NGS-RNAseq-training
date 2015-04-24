@@ -9,8 +9,8 @@ The code posted here will be maintained and might be different from that cointai
 
 This repo presents two folders for 
 
-* code relative to the unix command-line manipulation of the reads (QC, mapping, post-processing, ...)
-* the R/bioconductor analysis of the gene counts obtained from the mapping of the reads (EdgeR, Deseq2, RobiNA, ...)
+* [RNAseq-training/tree/master/scripts scripts]: code relative to the unix command-line manipulation of the reads (QC, mapping, post-processing, ...)
+* [RNAseq-training/tree/master/Rscripts Rscripts]:  the R/bioconductor analysis of the gene counts obtained from the mapping of the reads (EdgeR, Deseq2, RobiNA, ...)
 
 <h4>Please send comments and feedback to <a href="mailto:bits@vib.be">bits@vib.be</a></h4>
 
