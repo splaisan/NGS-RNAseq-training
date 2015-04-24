@@ -3,7 +3,7 @@
 
 Code developped for the 2015 sessions.
 
-Full information about the RNASeq hands-on training can be found on our WIKI [http://wiki.bits.vib.be](wiki.bits.vib.be) in the dedicated pages starting at [http://wiki.bits.vib.be/index.php/Hands-on_introduction_to_NGS_RNASeq_DE_analysis](Hands-on_introduction_to_NGS_RNASeq_DE_analysis).
+Full information about the RNASeq hands-on training can be found on our <a href="http://wiki.bits.vib.be" target="_blank">BITS WIKI</a> in the dedicated pages starting at <a href="http://wiki.bits.vib.be/index.php/Hands-on_introduction_to_NGS_RNASeq_DE_analysis" target="_blank">Hands-on_introduction_to_NGS_RNASeq_DE_analysis</a>
 
 The code posted here will be maintained and might be different from that cointained in the virtualbox image used during the training.
 
