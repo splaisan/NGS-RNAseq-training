@@ -10,7 +10,7 @@ The code posted here will be maintained and might be different from that cointai
 This repo presents two folders for 
 
 * [scripts](scripts): code relative to the unix command-line manipulation of the reads (QC, mapping, post-processing, ...)
-* [Rscripts](Rscripts):  the R/bioconductor analysis of the gene counts obtained from the mapping of the reads (EdgeR, Deseq2, RobiNA, ...)
+* [R-scripts](R-scripts):  the R/bioconductor analysis of the gene counts obtained from the mapping of the reads (EdgeR, Deseq2, RobiNA, ...)
 
 <h4>Please send comments and feedback to <a href="mailto:bits@vib.be">bits@vib.be</a></h4>
 
