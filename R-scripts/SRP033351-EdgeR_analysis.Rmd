@@ -1,7 +1,7 @@
 ---
 title: "EdgeR_analysis of the SRP033351 data"
 author: "SP:BITS"
-date: "14 Mar 2015"
+date: "April 27, 2015"
 output: pdf_document
 geometry: top=1.5cm, bottom=1.5cm, left=2cm, right=1cm
 papersize: a4paper
@@ -26,13 +26,12 @@ First we want to specify a variable which points to the directory in which the H
 
 ```{r}
 # please adapt this location to match your own environment
-#basedir <- "/work/TUTORIALS/NGS_RNASeqDE-training2015"
-basedir <- "/media/bits/RNASeq_DATA/Final_results/R_results"
+basedir <- "/media/bits/RNASeq_DATA"
 setwd(basedir)
 
 # load metadata
-metadata <- read.table("GSE52778_metadata.txt", header = TRUE)
-metadata$sampleFiles <- paste( metadata$run_accession, "_all_counts.txt", sep="")
+metadata <- read.table("/media/bits/RNASeq_DATA/input_files/GSE52778_metadata.txt", header = TRUE)
+metadata$sampleFiles <- paste( metadata$run_accession, "_all_counts.txt", sep="" )
 
 # restrict to untreated and Dex samples
 selectedRows <- metadata[grep("untreated|^Dex", metadata$treatment), ]
@@ -62,7 +61,6 @@ sampleTable
 Load HTSeq data into a merged dataframe object. EdgeR does not provide a function to load separate HTSeq files, we need to merge them using flat R code. We merge only teh 'untreated' and 'Dex' files.
 
 ```{r}
-#basedir <- "/work/TUTORIALS/NGS_RNASeqDE-training2015"
 basedir <- "/media/bits/RNASeq_DATA"
 setwd(basedir)
 

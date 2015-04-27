@@ -1,0 +1,143 @@
+---
+title: "compare DE results"
+author: "SP:BITS"
+date: "19 Mar 2015"
+output: pdf_document
+---
+
+Comparing DE results obtained with RobiNA and with full DESeq2 workflows.
+
+```{r}
+# compare-DESeq_LFC.R
+# copy this code to RStudio and adapt file locations to match yours
+
+basedir <- "/work/TUTORIALS/NGS_RNASeqDE-training2015"
+setwd(basedir)
+
+# load RobiNA results from files
+robina.deseq.file <- paste(basedir, 
+      "RobiNA/RobiNA_Deseq1rev/detailed_results/full_table_untr-dex.txt", sep="/")
+robina.deseq1 <- read.delim(robina.deseq.file, stringsAsFactors=FALSE)
+robina.deseq1 <- robina.deseq1[order(robina.deseq1$padj),]
+rownames(robina.deseq1) <- NULL
+head(robina.deseq1)
+
+robina.edger.file <- paste(basedir, 
+      "RobiNA/RobiNA_EdgeR/detailed_results/full_table_dex-untr.txt", sep="/")
+robina.edger <- read.delim(robina.edger.file, stringsAsFactors=FALSE)
+robina.edger <- robina.edger[order(robina.edger$FDR),]
+rownames(robina.edger) <- NULL
+colnames(robina.edger)[1] <- "id"
+head(robina.edger)
+
+# load DESeq2 results from files
+deseq2.file <- "Dex_vs_untreated_results.csv"
+deseq2_results <- read.csv(deseq2.file, stringsAsFactors=FALSE)
+deseq2_results <- deseq2_results[order(deseq2_results$padj),]
+colnames(deseq2_results)[1] <- "id"
+head(deseq2_results)
+
+# merge DESeq
+merged.results <- merge(robina.deseq1, robina.edger, by='id', all = TRUE) 
+merged.results <- merge(merged.results, deseq2_results, by='id', all = TRUE) 
+
+# plot scatterplot DESeq2 vs DESeq1
+#png(file="DESeq2-vs_1_log2FoldChange.png")
+
+# order by increasing DESeq2 padj
+merged.results <- merged.results[order(merged.results$padj.y),]
+
+top.res <- merged.results[which(merged.results$padj.y<0.1),]
+plot(top.res$log2FoldChange.x, top.res$log2FoldChange.y,
+     xlab="DESeq1 log2FoldChange - GSE52778",
+     ylab="DESeq2 log2FoldChange - SRP033351",
+     xlim=c(-4,4),
+     ylim=c(-4,4),
+     pch=20,
+     cex=0.5,
+     main="DESeq2 results with padj<0.1"
+  )
+
+# add red color for the top 100 hits
+top.100 <- head(merged.results, 100)
+points(top.100$log2FoldChange.x, top.100$log2FoldChange.y,
+       col="red", lwd=2, pch=21)
+# add lines
+abline(0, 1, col="green", lty=1, lwd=2)
+#dev.off()
+
+# plot scatterplot DESeq1 vs DESeq2
+#png(file="DESeq1-vs_2_log2FoldChange.png")
+
+# order by increasing DESeq1 padj
+merged.results <- merged.results[order(merged.results$padj.x),]
+
+top.res <- merged.results[which(merged.results$padj.y<0.1),]
+plot(top.res$log2FoldChange.y, top.res$log2FoldChange.x,
+     xlab="DESeq2 log2FoldChange - SRP033351",
+     ylab="DESeq1 log2FoldChange - GSE52778",
+     xlim=c(-4,4),
+     ylim=c(-4,4),
+     pch=20,
+     cex=0.5,
+     main="DESeq1 results with padj<0.1"
+)
+
+# add red color for the top 100 hits
+top.100 <- head(merged.results, 100)
+points(top.100$log2FoldChange.y, top.100$log2FoldChange.x,
+       col="red", lwd=2, pch=21)
+# add lines
+abline(0, 1, col="green", lty=1, lwd=2)
+#dev.off()
+
+# plot scatterplot DESeq1 vs EdgeR
+#png(file="DESeq1-vs_EdgeR_log2FoldChange.png")
+
+# re-sort by increasing DESeq1 hits
+merged.results <- merged.results[order(merged.results$padj.x),]
+
+top.res <- merged.results[which(merged.results$padj.x<0.1),]
+plot(top.res$logFC, top.res$log2FoldChange.x,
+     xlab="EdgeR log2FoldChange - GSE52778",
+     ylab="DESeq1 log2FoldChange - GSE52778",
+     xlim=c(-4,4),
+     ylim=c(-4,4),
+     pch=20,
+     cex=0.5,
+     main="DESeq1 results with padj<0.1"
+)
+
+# add red color for th etop 100 hits
+top.100 <- head(merged.results, 100)
+points(top.100$logFC, top.100$log2FoldChange.x,
+       col="red", lwd=2, pch=21)
+# add lines
+abline(0, 1, col="green", lty=1, lwd=2)
+#dev.off()
+
+# plot scatterplot EdgeR vs DESeq1 
+#png(file="EdgeR-vs_DESeq1_log2FoldChange.png")
+
+# re-sort by increasing EdgeR hits
+merged.results <- merged.results[order(merged.results$FDR),]
+
+top.res <- merged.results[which(merged.results$FDR<0.1),]
+plot(top.res$logFC, top.res$log2FoldChange.x,
+     xlab="DESeq1 log2FoldChange - GSE52778",
+     ylab="EdgeR log2FoldChange - GSE52778",
+     xlim=c(-4,4),
+     ylim=c(-4,4),
+     pch=20,
+     cex=0.5,
+     main="EdgeR results with FDR<0.1"
+)
+
+# add red color for th etop 100 hits
+top.100 <- head(merged.results, 100)
+points(top.100$log2FoldChange.x, top.100$logFC, 
+       col="red", lwd=2, pch=21)
+# add lines
+abline(0, 1, col="green", lty=1, lwd=2)
+#dev.off()
+```
