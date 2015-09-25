@@ -35,8 +35,9 @@ for fq in $RAWDATA/*.fastq.gz; do
 	## add conversion to PDF
 	# htmldoc --webpage -f ${prefix}_fastqc.pdf ${prefix}_fastqc.html
 
+	## Use now another package 'FASTX toolkit' to produce additional QC data
 	# generate statistics for plots
-	# secret option '-Q 3SRR1039509-chr22_fastq3' was added to fit with the phred scale
+	# secret option '-Q 33' was added to fit with the phred scale
 	echo "# checking: ${name}"
 	zcat ${fq} | fastx_quality_stats -Q 33 -o $READQC/${name}_stats.txt \
 		2>> $READQC/error.log
